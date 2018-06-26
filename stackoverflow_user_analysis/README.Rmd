@@ -22,7 +22,7 @@ source("multiplot.R") # to concatenate graphs
 project <- "machinelearning-196501"
 ```
 
-## 1. Monthly New Users and Total Users
+## 1 Monthly New Users and Total Users
 
 ```{r}
 sql1 <- "
@@ -58,7 +58,7 @@ so_users %>%
 As shown in the graph above, monthly new users for Stack Overflow are increasing steadily. The speed of the increase is also increasing, after 2014, the speed of increase became more steady. But at the end of 2016, there was a spike of increase in new users, this worthes looking into.  
 On the other hand, total users increases steadily after 2014.
 
-## 2. Users' monthly Year over Year increase
+## 2 Monthly Year over Year increase in Users
 
 ```{r}
 sql2 <- "
@@ -104,7 +104,7 @@ so_users_time %>%
 
 As shown in the graph above, before 2014, the YoY increase of new users are usually higher than 200%. After 2014, the increase rate is steady around 120% except for the end of 2016. On the other hand, the YoY increase rate for total users are over 500% before 2010, After that point, the YoY increase rate continuously decreases.
 
-## 3. Stack Overflow Active User Analysis
+## 3 Stack Overflow Active User Analysis
 
 ```{r}
 sql3 <- "
@@ -198,7 +198,7 @@ multiplot(active_user_plot, active_user_rate_plot,cols=2)
 
 Stack Overflow's active users are increasing steadily. And the increase rate for active users are always around 100%.
 
-## 4. User Status
+## 4 User Status
 
 Following Analysis display how how many users have what types of activities.
 
