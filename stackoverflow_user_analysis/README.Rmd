@@ -1,0 +1,344 @@
+---
+title: "Stack Overflow User Analysis"
+author: "Yifu Yan"
+date: "2018年6-26"
+output: github_document
+---
+
+## Project Description
+
+## Notice
+
+Executable Rmd file is saved in [README.Rmd](README.Rmd), which is used to create this report. Seperate sql file is saved in [stack_overflow_query.sql](stack_overflow_query.sql).
+
+
+```{r setup,message=FALSE} 
+knitr::opts_chunk$set(echo = FALSE)
+library(bigrquery) # to use bigquery api 
+library(tidyverse) 
+library(lubridate)
+source("multiplot.R") # to concatenate graphs
+project <- "machinelearning-196501"
+```
+
+## 1.
+```{r}
+sql1 <- "
+SELECT *, SUM(monthly_new_users) OVER (ORDER BY year_month) AS total_users
+FROM
+    (
+    SELECT *
+    FROM
+        (
+        SELECT  DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month,
+          COUNT(*) AS monthly_new_users
+        FROM `bigquery-public-data.stackoverflow.users` 
+        GROUP BY  DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY)
+        )
+    ORDER BY  year_month
+    )
+"
+
+sql1_result <- bq_project_query(project, query = sql1,useLegacySql = FALSE)
+so_users <- bq_table_download(sql1_result)
+```
+
+```{r, fig.width=10,fig.height=4.9} 
+so_users %>%     
+    gather(key = "user_type",value = "user_count",2,3) %>%     
+    ggplot(aes(x = year_month,y=user_count)) +     
+    geom_line(color="skyblue3") +     
+    facet_wrap(~user_type,scales = "free_y") +     
+    theme_light() +     
+    labs(title = "Stack Overflow New User and Total User Count")
+```
+
+## 2. Users' monthly Year over Year increase
+
+```{r}
+sql2 <- "
+SELECT *, 
+	LAG(monthly_new_users,12) OVER (ORDER BY year_month) AS last_year_montly_new_users,
+	LAG(total_users,12) OVER (ORDER BY year_month) AS last_year_total_new_users
+FROM
+	(
+	SELECT *, SUM(monthly_new_users) OVER (ORDER BY year_month) AS total_users
+	FROM
+		(
+		SELECT *
+		FROM
+			(
+			SELECT  DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month,
+			  COUNT(*) AS monthly_new_users
+			FROM `bigquery-public-data.stackoverflow.users` 
+			GROUP BY  DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY)
+			)
+		ORDER BY  year_month
+		)
+	)
+"
+
+sql2_result <- bq_project_query(project, query = sql2,useLegacySql = FALSE)
+so_users_time <- bq_table_download(sql2_result)
+```
+
+```{r, fig.width=10,fig.height=4.9}
+so_users_time %>%
+    dplyr::filter(!is.na(last_year_montly_new_users)) %>%
+    dplyr::filter(year_month > ymd("2009-07-31")) %>% #  The first month's YoY increase rate is too high, filter it
+    mutate(new_user_increase_rate_yoy = monthly_new_users/last_year_montly_new_users -1,
+           total_user_increase_rate_yoy = total_users/last_year_total_new_users) %>%
+    gather(key = "increase_type",value = "increase_rate",new_user_increase_rate_yoy,total_user_increase_rate_yoy) %>%
+    ggplot(aes(x = year_month,y =increase_rate)) +
+    geom_line(color="skyblue3") +     
+    facet_wrap(~increase_type,scales = "free_y") +     
+    theme_light() +     
+    labs(title = "Stack Overflow User YoY Increase Rate")
+    
+```
+
+## 3. Stack Overflow Active User Analysis
+
+```{r}
+sql3 <- "
+SELECT DISTINCT year_month,COUNT(*) AS active_users
+FROM
+	(
+	SELECT *
+	FROM
+		(
+		SELECT DISTINCT user_id,year_month
+		FROM
+			(
+			SELECT owner_user_id AS user_id,
+				DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+			FROM `bigquery-public-data.stackoverflow.posts_answers` 
+			UNION ALL
+			SELECT last_editor_user_id AS user_id,
+				DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+			FROM `bigquery-public-data.stackoverflow.posts_answers` 
+			)
+		GROUP BY user_id,year_month 
+		)
+	WHERE user_id IS NOT NULL
+	AND year_month IS NOT NULL
+
+	UNION DISTINCT
+
+	SELECT *
+	FROM
+		(
+		SELECT DISTINCT user_id,year_month
+		FROM
+			(
+			SELECT owner_user_id AS user_id,
+				DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+			FROM `bigquery-public-data.stackoverflow.posts_questions` 
+			UNION ALL
+			SELECT last_editor_user_id AS user_id,
+				DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+			FROM `bigquery-public-data.stackoverflow.posts_questions` 
+			)
+		GROUP BY user_id,year_month
+		)
+	WHERE user_id IS NOT NULL
+	AND year_month IS NOT NULL
+
+	UNION DISTINCT
+
+	SELECT *
+	FROM
+		(
+		SELECT DISTINCT user_id,year_month
+		FROM
+			(
+			SELECT user_id AS user_id,
+				DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+			FROM `bigquery-public-data.stackoverflow.comments`  
+			)
+		GROUP BY user_id,year_month 
+		)
+	WHERE user_id IS NOT NULL
+	AND year_month IS NOT NULL
+	)
+GROUP BY year_month
+ORDER BY year_month
+
+"
+
+sql3_result <- bq_project_query(project, query = sql3,useLegacySql = FALSE)
+so_active_users <- bq_table_download(sql3_result)
+```
+
+```{r,fig.width=7,fig.height=4.9}
+so_active_users <- so_active_users %>%
+    mutate(increase_rate = active_users/lag(active_users))
+active_user_plot <- so_active_users %>%
+    ggplot(aes(x=year_month,y=active_users)) +
+    geom_line(color="skyblue3") +
+    theme_light() +
+    labs(title = "Total Active Users")
+
+active_user_rate_plot <- so_active_users %>%
+    dplyr::filter(year_month > ymd("2008-08-31")) %>%
+    ggplot(aes(x=year_month,y=increase_rate)) +
+    geom_line(color="skyblue3") +
+    theme_light() +
+    labs(title = "Increase Rate for Active Users",subtile = "Second month increase rate is too high(438),so I remove it from the graph") 
+
+multiplot(active_user_plot, active_user_rate_plot,cols=2)
+```
+
+## 4. User Status
+
+Following Analysis display how how many users have what types of activities.
+
+```{r eval=FALSE, include=FALSE}
+sql4 <- "
+WITH
+	tb1 AS 
+		(
+		SELECT DISTINCT year_month, user_id
+		FROM
+			(
+			SELECT *
+			FROM
+				(
+				SELECT DISTINCT user_id,year_month
+				FROM
+					(
+					SELECT owner_user_id AS user_id,
+						DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+					FROM `bigquery-public-data.stackoverflow.posts_questions` 
+					UNION ALL
+					SELECT last_editor_user_id AS user_id,
+						DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+					FROM `bigquery-public-data.stackoverflow.posts_questions` 
+					)
+				GROUP BY user_id,year_month
+				)
+			WHERE user_id IS NOT NULL
+			AND year_month IS NOT NULL
+			)
+		GROUP BY year_month,user_id
+		)
+	,
+	tb2 AS
+		(
+		SELECT DISTINCT year_month, user_id
+		FROM
+			(
+			SELECT *
+			FROM
+				(
+				SELECT *
+				FROM
+					(
+					SELECT DISTINCT user_id,year_month
+					FROM
+						(
+						SELECT owner_user_id AS user_id,
+							DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+						FROM `bigquery-public-data.stackoverflow.posts_questions` 
+						UNION ALL
+						SELECT last_editor_user_id AS user_id,
+							DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+						FROM `bigquery-public-data.stackoverflow.posts_questions` 
+						)
+					GROUP BY user_id,year_month
+					)
+				WHERE user_id IS NOT NULL
+				AND year_month IS NOT NULL
+				)
+		GROUP BY year_month,user_id
+			)
+		)
+	,
+	tb3 AS
+		(
+		SELECT DISTINCT year_month, user_id
+		FROM
+			(
+			SELECT *
+			FROM
+				(
+				SELECT DISTINCT user_id,year_month
+				FROM
+					(
+					SELECT user_id AS user_id,
+						DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+					FROM `bigquery-public-data.stackoverflow.comments`  
+					)
+				GROUP BY user_id,year_month 
+				)
+			WHERE user_id IS NOT NULL
+			AND year_month IS NOT NULL
+			)
+		GROUP BY year_month,user_id
+		)
+	,
+	tb4 AS 
+		(
+		SELECT tb00.user_id,tb00.year_month,tb000.year_month AS creation_date
+		FROM
+			(
+			SELECT DISTINCT id AS user_id, tb0.year_month
+			FROM `bigquery-public-data.stackoverflow.users` 
+			CROSS JOIN
+				(
+				SELECT DISTINCT DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month
+				FROM `bigquery-public-data.stackoverflow.posts_answers`
+				) tb0
+			) tb00
+		LEFT JOIN 
+			(
+			SELECT  DATE_SUB(DATE_TRUNC(DATE_ADD(EXTRACT(DATE FROM creation_date), INTERVAL 1 MONTH), MONTH), INTERVAL 1 DAY) AS year_month,
+				id AS user_id
+			FROM `bigquery-public-data.stackoverflow.users`
+			) tb000
+		ON tb00.user_id = tb000.user_id
+		WHERE tb000.year_month <= tb00.year_month
+		)
+		
+		
+SELECT year_month,user_id,question_flag,answer_flag,comment_flag
+FROM 
+	(
+	SELECT year_month,user_id,
+		CASE WHEN question_flag IS NULL THEN 0 ELSE 1 END AS question_flag,
+		CASE WHEN answer_flag IS NULL THEN 0 ELSE 1 END AS answer_flag,
+		CASE WHEN comment_flag IS NULL THEN 0 ELSE 1 END AS comment_flag
+	FROM 
+		(
+		SELECT tb6.year_month, tb6.user_id, tb6.question_flag, tb6.answer_flag,tb3.user_id AS comment_flag,tb6.creation_date
+		FROM 
+			(
+			SELECT tb5.year_month, tb5.user_id, tb5.question_flag, tb2.user_id AS answer_flag,tb5.creation_date
+			FROM
+				(
+				SELECT tb4.year_month, tb4.user_id,tb1.user_id AS question_flag,tb4.creation_date
+				FROM tb4
+				LEFT JOIN tb1
+				ON tb4.year_month = tb1.year_month
+				AND tb4.user_id = tb1.user_id
+				) tb5
+			LEFT JOIN tb2
+			ON tb5.year_month = tb2.year_month
+			AND tb5.user_id = tb2.user_id
+			) tb6
+		LEFT JOIN tb3
+		ON tb6.year_month = tb3.year_month
+		AND tb6.user_id = tb3.user_id
+		) 	
+	)
+WHERE question_flag = 1
+OR answer_flag = 1 
+OR comment_flag = 1			
+"
+
+sql4_result <- bq_project_query(project, query = sql4,useLegacySql = FALSE)
+user_flag <- bq_table_download(sql4_result)
+```
+
+![df](stackoverflow_user_flag.PNG)
+
